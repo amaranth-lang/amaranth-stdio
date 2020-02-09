@@ -26,7 +26,7 @@ setup(
     install_requires=["nmigen"],
     packages=find_packages(),
     project_urls={
-        "Source Code": "https://github.com/m-labs/nmigen-stdio",
-        "Bug Tracker": "https://github.com/m-labs/nmigen-stdio/issues",
+        "Source Code": "https://github.com/nmigen/nmigen-stdio",
+        "Bug Tracker": "https://github.com/nmigen/nmigen-stdio/issues",
     },
 )
