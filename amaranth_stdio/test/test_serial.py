@@ -1,17 +1,18 @@
-# nmigen: UnusedElaboratable=no
+# amaranth: UnusedElaboratable=no
 
 import unittest
 
-from nmigen import *
-from nmigen.lib.fifo import SyncFIFO
-from nmigen.lib.io import pin_layout
-from nmigen.back.pysim import *
+from amaranth import *
+from amaranth.lib.fifo import SyncFIFO
+from amaranth.lib.io import pin_layout
+from amaranth.back.pysim import *
 
 from ..serial import *
 
 
 def simulation_test(dut, process):
-    with Simulator(dut, vcd_file=open("test.vcd", "w")) as sim:
+    sim = Simulator(dut)
+    with sim.write_vcd("test.vcd"):
         sim.add_clock(1e-6)
         sim.add_sync_process(process)
         sim.run()
@@ -35,10 +36,11 @@ class AsyncSerialRXTestCase(unittest.TestCase):
             while not (yield self.dut.rdy):
                 yield
             if data is not None:
-                self.assertFalse((yield self.dut.err))
+                self.assertFalse((yield self.dut.err.overflow))
+                self.assertFalse((yield self.dut.err.frame))
+                self.assertFalse((yield self.dut.err.parity))
                 self.assertEqual((yield self.dut.data), data)
             if errors is not None:
-                self.assertTrue((yield self.dut.err))
                 for error in errors:
                     self.assertTrue((yield getattr(self.dut.err, error)))
         simulation_test(self.dut, process)

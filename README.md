@@ -1,11 +1,9 @@
-# Industry standard I/O for nMigen
+# Industry standard I/O for Amaranth HDL
 
-## Modules for standard I/O such as UART, SPI, I²C, ...
+TODO
 
-TBD
+## License
 
-### License
-
-nMigen is released under the very permissive two-clause BSD license. Under the terms of this license, you are authorized to use nMigen for closed-source proprietary designs.
+Amaranth is released under the very permissive two-clause BSD license. Under the terms of this license, you are authorized to use Amaranth for closed-source proprietary designs.
 
 See LICENSE file for full copyright and license info.
