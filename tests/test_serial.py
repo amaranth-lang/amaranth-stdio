@@ -5,9 +5,9 @@ import unittest
 from amaranth import *
 from amaranth.lib.fifo import SyncFIFO
 from amaranth.lib.io import pin_layout
-from amaranth.back.pysim import *
+from amaranth.sim import *
 
-from ..serial import *
+from amaranth_stdio.serial import *
 
 
 def simulation_test(dut, process):
