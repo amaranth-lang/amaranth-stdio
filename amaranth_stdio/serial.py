@@ -55,8 +55,8 @@ class AsyncSerialRX(Elaboratable):
         Data width.
     parity : ``"none"``, ``"mark"``, ``"space"``, ``"even"``, ``"odd"``
         Parity mode.
-    pins : :class:`nmigen.lib.io.Pin`
-        Optional. UART pins. See :class:`nmigen_boards.resources.UARTResource` for layout.
+    pins : :class:`amaranth.lib.io.Pin`
+        Optional. UART pins. See :class:`amaranth_boards.resources.UARTResource` for layout.
 
     Attributes
     ----------
@@ -160,8 +160,8 @@ class AsyncSerialTX(Elaboratable):
         Data width.
     parity : ``"none"``, ``"mark"``, ``"space"``, ``"even"``, ``"odd"``
         Parity mode.
-    pins : :class:`nmigen.lib.io.Pin`
-        Optional. UART pins. See :class:`nmigen_boards.resources.UARTResource` for layout.
+    pins : :class:`amaranth.lib.io.Pin`
+        Optional. UART pins. See :class:`amaranth_boards.resources.UARTResource` for layout.
 
     Attributes
     ----------
@@ -243,8 +243,8 @@ class AsyncSerial(Elaboratable):
         Data width.
     parity : ``"none"``, ``"mark"``, ``"space"``, ``"even"``, ``"odd"``
         Parity mode.
-    pins : :class:`nmigen.lib.io.Pin`
-        Optional. UART pins. See :class:`nmigen_boards.resources.UARTResource` for layout.
+    pins : :class:`amaranth.lib.io.Pin`
+        Optional. UART pins. See :class:`amaranth_boards.resources.UARTResource` for layout.
 
     Attributes
     ----------
