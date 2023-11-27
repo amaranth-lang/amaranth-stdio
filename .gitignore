@@ -1,8 +1,18 @@
 # Python
-*.pyc
-/*.egg-info
-/.eggs
+__pycache__/
+*.egg-info
 /dist
 
-# Amaranth
+# pdm
+/.pdm-plugins
+/.pdm-python
+/.venv
+/pdm.lock
+
+# coverage
+/.coverage
+/htmlcov
+
+# tests
 *.vcd
+*.gtkw
