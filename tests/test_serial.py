@@ -1,10 +1,12 @@
 # amaranth: UnusedElaboratable=no
 
-import unittest
+from unittest import TestCase
 
 from amaranth import *
+from amaranth.lib.data import StructLayout
 from amaranth.lib.fifo import SyncFIFO
 from amaranth.lib.io import pin_layout
+from amaranth.lib.wiring import *
 from amaranth.sim import *
 
 from amaranth_stdio.serial import *
@@ -18,21 +20,114 @@ def simulation_test(dut, process):
         sim.run()
 
 
-class AsyncSerialRXTestCase(unittest.TestCase):
+class _DummyPins:
+    def __init__(self):
+        self.rx = Signal(StructLayout({"i": 1}), reset={"i": 1})
+        self.tx = Signal(StructLayout({"o": 1}), reset={"o": 1})
+
+
+class AsyncSerialRXSignatureTestCase(TestCase):
+    def test_simple(self):
+        sig = AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 8)
+        self.assertEqual(sig.data_bits, 7)
+        self.assertEqual(sig.parity, Parity.EVEN)
+        self.assertEqual(sig.members, Signature({
+            "divisor": In(unsigned(8), reset=10),
+            "data":    Out(unsigned(7)),
+            "err":     Out(StructLayout({"overflow": 1, "frame": 1, "parity": 1})),
+            "rdy":     Out(unsigned(1)),
+            "ack":     In(unsigned(1)),
+            "i":       In(unsigned(1), reset=1),
+        }).members)
+
+    def test_defaults(self):
+        sig = AsyncSerialRX.Signature(divisor=10)
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 4)
+        self.assertEqual(sig.data_bits, 8)
+        self.assertEqual(sig.parity, Parity.NONE)
+
+    def test_eq(self):
+        self.assertEqual(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                         AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor
+        self.assertNotEqual(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialRX.Signature(divisor= 8, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor_bits
+        self.assertNotEqual(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialRX.Signature(divisor=10, divisor_bits=4, data_bits=7, parity="even"))
+        # different data_bits
+        self.assertNotEqual(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"))
+        # different parity
+        self.assertNotEqual(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"),
+                            AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="none"))
+
+    def test_repr(self):
+        sig = AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(repr(sig), "AsyncSerialRX.Signature(SignatureMembers({"
+                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'data': Out(unsigned(7)), "
+                                        "'err': Out(StructLayout({"
+                                            "'overflow': 1, "
+                                            "'frame': 1, "
+                                            "'parity': 1})), "
+                                        "'rdy': Out(unsigned(1)), "
+                                        "'ack': In(unsigned(1)), "
+                                        "'i': In(unsigned(1), reset=1)}))")
+
+    def test_wrong_divisor(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 5, not 4"):
+            AsyncSerialRX.Signature(divisor=4)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 5, not 4"):
+            AsyncSerialRX.Signature.check_parameters(divisor=4)
+
+    def test_wrong_divisor_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerialRX.Signature(divisor=8, divisor_bits=3)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerialRX.Signature.check_parameters(divisor=8, divisor_bits=3)
+
+    def test_wrong_data_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerialRX.Signature(divisor=10, data_bits=-1)
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerialRX.Signature.check_parameters(divisor=10, data_bits=-1)
+
+    def test_wrong_parity(self):
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerialRX.Signature(divisor=10, parity="foo")
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerialRX.Signature.check_parameters(divisor=10, parity="foo")
+
+
+class AsyncSerialRXTestCase(TestCase):
     def tx_period(self):
         for _ in range((yield self.dut.divisor)):
             yield
 
-    def tx_bits(self, bits):
+    def tx_bits(self, bits, pins=None):
+        if pins is not None:
+            rx_i = pins.rx.i
+        else:
+            rx_i = self.dut.i
         for bit in bits:
             yield from self.tx_period()
-            yield self.dut.i.eq(bit)
+            yield rx_i.eq(bit)
 
-    def rx_test(self, bits, *, data=None, errors=None):
+    def rx_test(self, bits, *, data=None, errors=None, pins=None):
         def process():
             self.assertFalse((yield self.dut.rdy))
             yield self.dut.ack.eq(1)
-            yield from self.tx_bits(bits)
+            yield from self.tx_bits(bits, pins)
             while not (yield self.dut.rdy):
                 yield
             if data is not None:
@@ -45,15 +140,20 @@ class AsyncSerialRXTestCase(unittest.TestCase):
                     self.assertTrue((yield getattr(self.dut.err, error)))
         simulation_test(self.dut, process)
 
-    def test_invalid_divisor(self):
-        with self.assertRaisesRegex(ValueError,
-                r"Invalid divisor 1; must be greater than or equal to 5"):
-            self.dut = AsyncSerialRX(divisor=1)
+    def test_signature(self):
+        dut = AsyncSerialRX(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertIsInstance(dut.signature, AsyncSerialRX.Signature)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 8)
+        self.assertEqual(dut.signature.data_bits, 7)
+        self.assertEqual(dut.signature.parity, Parity.EVEN)
 
-    def test_invalid_parity(self):
-        with self.assertRaisesRegex(ValueError,
-                r"Invalid parity 'bad'; must be one of none, mark, space, even, odd"):
-            self.dut = AsyncSerialRX(divisor=5, parity="bad")
+    def test_defaults(self):
+        dut = AsyncSerialRX(divisor=10)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 4)
+        self.assertEqual(dut.signature.data_bits, 8)
+        self.assertEqual(dut.signature.parity, Parity.NONE)
 
     def test_8n1(self):
         self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none")
@@ -87,6 +187,11 @@ class AsyncSerialRXTestCase(unittest.TestCase):
         self.rx_test([0, 1,0,1,0,1,1,1,0, 0, 1], data=0b01110101)
         self.rx_test([0, 1,0,1,0,1,1,0,0, 1, 1], data=0b00110101)
         self.rx_test([0, 1,0,1,0,1,1,1,0, 1, 1], errors={"parity"})
+
+    def test_8n1_pins(self):
+        pins = _DummyPins()
+        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none", pins=pins)
+        self.rx_test([0, 1,0,1,0,1,1,1,0, 1], data=0b01110101, pins=pins)
 
     def test_err_frame(self):
         self.dut = AsyncSerialRX(divisor=5)
@@ -130,12 +235,94 @@ class AsyncSerialRXTestCase(unittest.TestCase):
         simulation_test(m, process)
 
 
-class AsyncSerialTXTestCase(unittest.TestCase):
+class AsyncSerialTXSignatureTestCase(TestCase):
+    def test_simple(self):
+        sig = AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 8)
+        self.assertEqual(sig.data_bits, 7)
+        self.assertEqual(sig.parity, Parity.EVEN)
+        self.assertEqual(sig.members, Signature({
+            "divisor": In(unsigned(8), reset=10),
+            "data":    In(unsigned(7)),
+            "rdy":     Out(unsigned(1)),
+            "ack":     In(unsigned(1)),
+            "o":       Out(unsigned(1), reset=1),
+        }).members)
+
+    def test_defaults(self):
+        sig = AsyncSerialTX.Signature(divisor=10)
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 4)
+        self.assertEqual(sig.data_bits, 8)
+        self.assertEqual(sig.parity, Parity.NONE)
+
+    def test_eq(self):
+        self.assertEqual(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                         AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor
+        self.assertNotEqual(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialTX.Signature(divisor= 8, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor_bits
+        self.assertNotEqual(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialTX.Signature(divisor=10, divisor_bits=4, data_bits=7, parity="even"))
+        # different data_bits
+        self.assertNotEqual(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"))
+        # different parity
+        self.assertNotEqual(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"),
+                            AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="none"))
+
+    def test_repr(self):
+        sig = AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(repr(sig), "AsyncSerialTX.Signature(SignatureMembers({"
+                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'data': In(unsigned(7)), "
+                                        "'rdy': Out(unsigned(1)), "
+                                        "'ack': In(unsigned(1)), "
+                                        "'o': Out(unsigned(1), reset=1)}))")
+
+    def test_wrong_divisor(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 1, not 0"):
+            AsyncSerialTX.Signature(divisor=0)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 1, not 0"):
+            AsyncSerialTX.Signature.check_parameters(divisor=0)
+
+    def test_wrong_divisor_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerialTX.Signature(divisor=8, divisor_bits=3)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerialTX.Signature.check_parameters(divisor=8, divisor_bits=3)
+
+    def test_wrong_data_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerialTX.Signature(divisor=10, data_bits=-1)
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerialTX.Signature.check_parameters(divisor=10, data_bits=-1)
+
+    def test_wrong_parity(self):
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerialTX.Signature(divisor=10, parity="foo")
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerialTX.Signature.check_parameters(divisor=10, parity="foo")
+
+
+class AsyncSerialTXTestCase(TestCase):
     def tx_period(self):
         for _ in range((yield self.dut.divisor)):
             yield
 
-    def tx_test(self, data, *, bits):
+    def tx_test(self, data, *, bits, pins=None):
+        if pins is not None:
+            tx_o = pins.tx.o
+        else:
+            tx_o = self.dut.o
         def process():
             self.assertTrue((yield self.dut.rdy))
             yield self.dut.data.eq(data)
@@ -144,18 +331,23 @@ class AsyncSerialTXTestCase(unittest.TestCase):
                 yield
             for bit in bits:
                 yield from self.tx_period()
-                self.assertEqual((yield self.dut.o), bit)
+                self.assertEqual((yield tx_o), bit)
         simulation_test(self.dut, process)
 
-    def test_invalid_divisor(self):
-        with self.assertRaisesRegex(ValueError,
-                r"Invalid divisor 0; must be greater than or equal to 1"):
-            self.dut = AsyncSerialTX(divisor=0)
+    def test_signature(self):
+        dut = AsyncSerialTX(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertIsInstance(dut.signature, AsyncSerialTX.Signature)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 8)
+        self.assertEqual(dut.signature.data_bits, 7)
+        self.assertEqual(dut.signature.parity, Parity.EVEN)
 
-    def test_invalid_parity(self):
-        with self.assertRaisesRegex(ValueError,
-                r"Invalid parity 'bad'; must be one of none, mark, space, even, odd"):
-            self.dut = AsyncSerialTX(divisor=1, parity="bad")
+    def test_defaults(self):
+        dut = AsyncSerialTX(divisor=10)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 4)
+        self.assertEqual(dut.signature.data_bits, 8)
+        self.assertEqual(dut.signature.parity, Parity.NONE)
 
     def test_8n1(self):
         self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none")
@@ -184,6 +376,11 @@ class AsyncSerialTXTestCase(unittest.TestCase):
         self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="odd")
         self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 0, 1])
         self.tx_test(0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 1, 1])
+
+    def test_8n1_pins(self):
+        pins = _DummyPins()
+        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none", pins=pins)
+        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1], pins=pins)
 
     def test_fifo(self):
         self.dut  = AsyncSerialTX(divisor=1)
@@ -216,10 +413,130 @@ class AsyncSerialTXTestCase(unittest.TestCase):
         simulation_test(m, process)
 
 
-class AsyncSerialTestCase(unittest.TestCase):
+class AsyncSerialSignatureTestCase(TestCase):
+    def test_simple(self):
+        sig = AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 8)
+        self.assertEqual(sig.data_bits, 7)
+        self.assertEqual(sig.parity, Parity.EVEN)
+        self.assertEqual(sig.members, Signature({
+            "divisor": In(unsigned(8), reset=10),
+            "rx": Out(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")),
+            "tx": Out(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")),
+        }).members)
+
+    def test_defaults(self):
+        sig = AsyncSerial.Signature(divisor=10)
+        self.assertEqual(sig.divisor, 10)
+        self.assertEqual(sig.divisor_bits, 4)
+        self.assertEqual(sig.data_bits, 8)
+        self.assertEqual(sig.parity, Parity.NONE)
+
+    def test_eq(self):
+        self.assertEqual(AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                         AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor
+        self.assertNotEqual(AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerial.Signature(divisor= 8, divisor_bits=8, data_bits=7, parity="even"))
+        # different divisor_bits
+        self.assertNotEqual(AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerial.Signature(divisor=10, divisor_bits=4, data_bits=7, parity="even"))
+        # different data_bits
+        self.assertNotEqual(AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even"),
+                            AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"))
+        # different parity
+        self.assertNotEqual(AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="even"),
+                            AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=8, parity="none"))
+
+    def test_repr(self):
+        sig = AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertEqual(repr(sig), "AsyncSerial.Signature(SignatureMembers({"
+                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'rx': Out(AsyncSerialRX.Signature(SignatureMembers({"
+                                            "'divisor': In(unsigned(8), reset=10), "
+                                            "'data': Out(unsigned(7)), "
+                                            "'err': Out(StructLayout({"
+                                                "'overflow': 1, "
+                                                "'frame': 1, "
+                                                "'parity': 1})), "
+                                            "'rdy': Out(unsigned(1)), "
+                                            "'ack': In(unsigned(1)), "
+                                            "'i': In(unsigned(1), reset=1)}))), "
+                                        "'tx': Out(AsyncSerialTX.Signature(SignatureMembers({"
+                                            "'divisor': In(unsigned(8), reset=10), "
+                                            "'data': In(unsigned(7)), "
+                                            "'rdy': Out(unsigned(1)), "
+                                            "'ack': In(unsigned(1)), "
+                                            "'o': Out(unsigned(1), reset=1)})))}))")
+
+    def test_wrong_divisor(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 5, not 4"):
+            AsyncSerial.Signature(divisor=4)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor initial value must be an integer greater than or equal to 5, not 4"):
+            AsyncSerial.Signature.check_parameters(divisor=4)
+
+    def test_wrong_divisor_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerial.Signature(divisor=8, divisor_bits=3)
+        with self.assertRaisesRegex(TypeError,
+                r"Divisor bits must be an integer greater than or equal to 4, not 3"):
+            AsyncSerial.Signature.check_parameters(divisor=8, divisor_bits=3)
+
+    def test_wrong_data_bits(self):
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerial.Signature(divisor=10, data_bits=-1)
+        with self.assertRaisesRegex(TypeError,
+                r"Data bits must be a non-negative integer, not -1"):
+            AsyncSerial.Signature.check_parameters(divisor=10, data_bits=-1)
+
+    def test_wrong_parity(self):
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerial.Signature(divisor=10, parity="foo")
+        with self.assertRaisesRegex(ValueError, r"'foo' is not a valid Parity"):
+            AsyncSerial.Signature.check_parameters(divisor=10, parity="foo")
+
+
+class AsyncSerialTestCase(TestCase):
+    def test_signature(self):
+        dut = AsyncSerial(divisor=10, divisor_bits=8, data_bits=7, parity="even")
+        self.assertIsInstance(dut.signature, AsyncSerial.Signature)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 8)
+        self.assertEqual(dut.signature.data_bits, 7)
+        self.assertEqual(dut.signature.parity, Parity.EVEN)
+
+    def test_defaults(self):
+        dut = AsyncSerial(divisor=10)
+        self.assertEqual(dut.signature.divisor, 10)
+        self.assertEqual(dut.signature.divisor_bits, 4)
+        self.assertEqual(dut.signature.data_bits, 8)
+        self.assertEqual(dut.signature.parity, Parity.NONE)
+
     def test_loopback(self):
-        pins = Record([("rx", pin_layout(1, dir="i")),
-                       ("tx", pin_layout(1, dir="o"))])
+        self.dut = AsyncSerial(divisor=5)
+        m = Module()
+        m.submodules.serial = self.dut
+        m.d.comb += self.dut.rx.i.eq(self.dut.tx.o)
+        def process():
+            self.assertTrue((yield self.dut.tx.rdy))
+            yield self.dut.tx.data.eq(0xAA)
+            yield self.dut.tx.ack.eq(1)
+            yield
+            yield self.dut.tx.ack.eq(0)
+            yield self.dut.rx.ack.eq(1)
+            yield
+            while not (yield self.dut.rx.rdy):
+                yield
+            self.assertEqual((yield self.dut.rx.data), 0xAA)
+        simulation_test(m, process)
+
+    def test_loopback_pins(self):
+        pins = _DummyPins()
         self.dut = AsyncSerial(divisor=5, pins=pins)
         m = Module()
         m.submodules.serial = self.dut
