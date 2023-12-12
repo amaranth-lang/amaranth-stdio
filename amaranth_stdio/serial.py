@@ -172,26 +172,15 @@ class AsyncSerialRX(wiring.Component):
     See :meth:`AsyncSerialRX.Signature.check_parameters`.
     """
     def __init__(self, *, divisor, divisor_bits=None, data_bits=8, parity="none", pins=None):
-        self.Signature.check_parameters(divisor=divisor, divisor_bits=divisor_bits,
-                                        data_bits=data_bits, parity=parity)
-        self._divisor      = divisor
-        self._divisor_bits = divisor_bits if divisor_bits is not None else bits_for(divisor)
-        self._data_bits    = data_bits
-        self._parity       = Parity(parity)
-        self._pins         = pins
-
-        super().__init__()
-
-    @property
-    def signature(self):
-        return self.Signature(divisor=self._divisor, divisor_bits=self._divisor_bits,
-                              data_bits=self._data_bits, parity=self._parity)
+        super().__init__(self.Signature(divisor=divisor, divisor_bits=divisor_bits,
+                                        data_bits=data_bits, parity=parity))
+        self._pins = pins
 
     def elaborate(self, platform):
         m = Module()
 
         timer = Signal.like(self.divisor)
-        shreg = Signal(_FrameLayout(self._data_bits, self._parity))
+        shreg = Signal(_FrameLayout(len(self.data), self.signature.parity))
         bitno = Signal(range(len(shreg.as_value())))
 
         if self._pins is not None:
@@ -224,7 +213,7 @@ class AsyncSerialRX(wiring.Component):
                         self.data.eq(shreg.data),
                         self.err.frame .eq(~((shreg.start == 0) & (shreg.stop == 1))),
                         self.err.parity.eq(~(shreg.parity ==
-                                             self._parity._compute_bit(shreg.data))),
+                                             self.signature.parity._compute_bit(shreg.data))),
                     ]
                 m.d.sync += self.err.overflow.eq(~self.ack)
                 m.next = "IDLE"
@@ -357,26 +346,15 @@ class AsyncSerialTX(wiring.Component):
     See :class:`AsyncSerialTX.Signature.check_parameters`.
     """
     def __init__(self, *, divisor, divisor_bits=None, data_bits=8, parity="none", pins=None):
-        self.Signature.check_parameters(divisor=divisor, divisor_bits=divisor_bits,
-                                        data_bits=data_bits, parity=parity)
-        self._divisor      = divisor
-        self._divisor_bits = divisor_bits if divisor_bits is not None else bits_for(divisor)
-        self._data_bits    = data_bits
-        self._parity       = Parity(parity)
-        self._pins         = pins
-
-        super().__init__()
-
-    @property
-    def signature(self):
-        return self.Signature(divisor=self._divisor, divisor_bits=self._divisor_bits,
-                              data_bits=self._data_bits, parity=self._parity)
+        super().__init__(signature=self.Signature(divisor=divisor, divisor_bits=divisor_bits,
+                                                  data_bits=data_bits, parity=parity))
+        self._pins = pins
 
     def elaborate(self, platform):
         m = Module()
 
         timer = Signal.like(self.divisor)
-        shreg = Signal(_FrameLayout(len(self.data), self._parity))
+        shreg = Signal(_FrameLayout(len(self.data), self.signature.parity))
         bitno = Signal(range(len(shreg.as_value())))
 
         if self._pins is not None:
@@ -389,7 +367,7 @@ class AsyncSerialTX(wiring.Component):
                     m.d.sync += [
                         shreg.start .eq(0),
                         shreg.data  .eq(self.data),
-                        shreg.parity.eq(self._parity._compute_bit(self.data)),
+                        shreg.parity.eq(self.signature.parity._compute_bit(self.data)),
                         shreg.stop  .eq(1),
                         bitno.eq(len(shreg.as_value()) - 1),
                         timer.eq(self.divisor - 1),
@@ -540,28 +518,21 @@ class AsyncSerial(wiring.Component):
     See :meth:`AsyncSerial.Signature.check_parameters`.
     """
     def __init__(self, *, divisor, divisor_bits=None, data_bits=8, parity="none", pins=None):
-        self.Signature.check_parameters(divisor=divisor, divisor_bits=divisor_bits,
-                                        data_bits=data_bits, parity=parity)
-        self._divisor      = divisor
-        self._divisor_bits = divisor_bits if divisor_bits is not None else bits_for(divisor)
-        self._data_bits    = data_bits
-        self._parity       = Parity(parity)
-        self._pins         = pins
-
-        super().__init__()
-
-    @property
-    def signature(self):
-        return self.Signature(divisor=self._divisor, divisor_bits=self._divisor_bits,
-                              data_bits=self._data_bits, parity=self._parity)
+        super().__init__(self.Signature(divisor=divisor, divisor_bits=divisor_bits,
+                                        data_bits=data_bits, parity=parity))
+        self._pins = pins
 
     def elaborate(self, platform):
         m = Module()
 
-        rx = AsyncSerialRX(divisor=self._divisor, divisor_bits=self._divisor_bits,
-                           data_bits=self._data_bits, parity=self._parity)
-        tx = AsyncSerialTX(divisor=self._divisor, divisor_bits=self._divisor_bits,
-                           data_bits=self._data_bits, parity=self._parity)
+        rx = AsyncSerialRX(divisor=self.signature.divisor,
+                           divisor_bits=self.signature.divisor_bits,
+                           data_bits=self.signature.data_bits,
+                           parity=self.signature.parity)
+        tx = AsyncSerialTX(divisor=self.signature.divisor,
+                           divisor_bits=self.signature.divisor_bits,
+                           data_bits=self.signature.data_bits,
+                           parity=self.signature.parity)
         m.submodules.rx = rx
         m.submodules.tx = tx
 
