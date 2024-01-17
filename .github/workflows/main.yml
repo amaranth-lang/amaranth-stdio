@@ -1,6 +1,7 @@
 on:
   push:
   pull_request:
+  merge_group:
   schedule:
   - cron: '0 0 * * *' # test daily against git HEAD of dependencies
 
@@ -15,6 +16,7 @@ jobs:
         - '3.8'
         # this version range needs to be synchronized with the one in pyproject.toml
         amaranth-version:
+        - '0.4'
         - 'git'
       fail-fast: false
     steps:
