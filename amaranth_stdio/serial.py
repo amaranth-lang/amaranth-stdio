@@ -88,12 +88,12 @@ class AsyncSerialRX(wiring.Component):
             self._parity       = Parity(parity)
 
             super().__init__({
-                "divisor": In(unsigned(self._divisor_bits), reset=self._divisor),
+                "divisor": In(unsigned(self._divisor_bits), init=self._divisor),
                 "data":    Out(unsigned(self._data_bits)),
                 "err":     Out(data.StructLayout({"overflow": 1, "frame": 1, "parity": 1})),
                 "rdy":     Out(unsigned(1)),
                 "ack":     In(unsigned(1)),
-                "i":       In(unsigned(1), reset=1),
+                "i":       In(unsigned(1), init=1),
             })
 
         @classmethod
@@ -184,7 +184,7 @@ class AsyncSerialRX(wiring.Component):
         bitno = Signal(range(len(shreg.as_value())))
 
         if self._pins is not None:
-            m.submodules += FFSynchronizer(self._pins.rx.i, self.i, reset=1)
+            m.submodules += FFSynchronizer(self._pins.rx.i, self.i, init=1)
 
         with m.FSM() as fsm:
             with m.State("IDLE"):
@@ -265,11 +265,11 @@ class AsyncSerialTX(wiring.Component):
             self._parity       = Parity(parity)
 
             super().__init__({
-                "divisor": In(unsigned(self._divisor_bits), reset=self._divisor),
+                "divisor": In(unsigned(self._divisor_bits), init=self._divisor),
                 "data":    In(unsigned(self._data_bits)),
                 "rdy":     Out(unsigned(1)),
                 "ack":     In(unsigned(1)),
-                "o":       Out(unsigned(1), reset=1),
+                "o":       Out(unsigned(1), init=1),
             })
 
         @classmethod
@@ -425,10 +425,10 @@ class AsyncSerial(wiring.Component):
 
             assert rx_sig.members["divisor"] == tx_sig.members["divisor"]
             divisor_shape = rx_sig.members["divisor"].shape
-            divisor_reset = rx_sig.members["divisor"].reset
+            divisor_init  = rx_sig.members["divisor"].init
 
             super().__init__({
-                "divisor": In(divisor_shape, reset=divisor_reset),
+                "divisor": In(divisor_shape, init=divisor_init),
                 "rx":      Out(rx_sig),
                 "tx":      Out(tx_sig),
             })
@@ -542,7 +542,7 @@ class AsyncSerial(wiring.Component):
         ]
 
         if self._pins is not None:
-            m.submodules += FFSynchronizer(self._pins.rx.i, self.rx.i, reset=1)
+            m.submodules += FFSynchronizer(self._pins.rx.i, self.rx.i, init=1)
             m.d.comb += self._pins.tx.o.eq(self.tx.o)
 
         connect(m, flipped(self.rx), rx)
