@@ -5,7 +5,6 @@ from unittest import TestCase
 from amaranth import *
 from amaranth.lib.data import StructLayout
 from amaranth.lib.fifo import SyncFIFO
-from amaranth.lib.io import pin_layout
 from amaranth.lib.wiring import *
 from amaranth.sim import *
 
