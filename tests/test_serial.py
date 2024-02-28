@@ -21,8 +21,8 @@ def simulation_test(dut, process):
 
 class _DummyPins:
     def __init__(self):
-        self.rx = Signal(StructLayout({"i": 1}), reset={"i": 1})
-        self.tx = Signal(StructLayout({"o": 1}), reset={"o": 1})
+        self.rx = Signal(StructLayout({"i": 1}), init={"i": 1})
+        self.tx = Signal(StructLayout({"o": 1}), init={"o": 1})
 
 
 class AsyncSerialRXSignatureTestCase(TestCase):
@@ -33,12 +33,12 @@ class AsyncSerialRXSignatureTestCase(TestCase):
         self.assertEqual(sig.data_bits, 7)
         self.assertEqual(sig.parity, Parity.EVEN)
         self.assertEqual(sig.members, Signature({
-            "divisor": In(unsigned(8), reset=10),
+            "divisor": In(unsigned(8), init=10),
             "data":    Out(unsigned(7)),
             "err":     Out(StructLayout({"overflow": 1, "frame": 1, "parity": 1})),
             "rdy":     Out(unsigned(1)),
             "ack":     In(unsigned(1)),
-            "i":       In(unsigned(1), reset=1),
+            "i":       In(unsigned(1), init=1),
         }).members)
 
     def test_defaults(self):
@@ -67,7 +67,7 @@ class AsyncSerialRXSignatureTestCase(TestCase):
     def test_repr(self):
         sig = AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
         self.assertEqual(repr(sig), "AsyncSerialRX.Signature(SignatureMembers({"
-                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'divisor': In(unsigned(8), init=10), "
                                         "'data': Out(unsigned(7)), "
                                         "'err': Out(StructLayout({"
                                             "'overflow': 1, "
@@ -75,7 +75,7 @@ class AsyncSerialRXSignatureTestCase(TestCase):
                                             "'parity': 1})), "
                                         "'rdy': Out(unsigned(1)), "
                                         "'ack': In(unsigned(1)), "
-                                        "'i': In(unsigned(1), reset=1)}))")
+                                        "'i': In(unsigned(1), init=1)}))")
 
     def test_wrong_divisor(self):
         with self.assertRaisesRegex(TypeError,
@@ -242,11 +242,11 @@ class AsyncSerialTXSignatureTestCase(TestCase):
         self.assertEqual(sig.data_bits, 7)
         self.assertEqual(sig.parity, Parity.EVEN)
         self.assertEqual(sig.members, Signature({
-            "divisor": In(unsigned(8), reset=10),
+            "divisor": In(unsigned(8), init=10),
             "data":    In(unsigned(7)),
             "rdy":     Out(unsigned(1)),
             "ack":     In(unsigned(1)),
-            "o":       Out(unsigned(1), reset=1),
+            "o":       Out(unsigned(1), init=1),
         }).members)
 
     def test_defaults(self):
@@ -275,11 +275,11 @@ class AsyncSerialTXSignatureTestCase(TestCase):
     def test_repr(self):
         sig = AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
         self.assertEqual(repr(sig), "AsyncSerialTX.Signature(SignatureMembers({"
-                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'divisor': In(unsigned(8), init=10), "
                                         "'data': In(unsigned(7)), "
                                         "'rdy': Out(unsigned(1)), "
                                         "'ack': In(unsigned(1)), "
-                                        "'o': Out(unsigned(1), reset=1)}))")
+                                        "'o': Out(unsigned(1), init=1)}))")
 
     def test_wrong_divisor(self):
         with self.assertRaisesRegex(TypeError,
@@ -420,7 +420,7 @@ class AsyncSerialSignatureTestCase(TestCase):
         self.assertEqual(sig.data_bits, 7)
         self.assertEqual(sig.parity, Parity.EVEN)
         self.assertEqual(sig.members, Signature({
-            "divisor": In(unsigned(8), reset=10),
+            "divisor": In(unsigned(8), init=10),
             "rx": Out(AsyncSerialRX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")),
             "tx": Out(AsyncSerialTX.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")),
         }).members)
@@ -451,9 +451,9 @@ class AsyncSerialSignatureTestCase(TestCase):
     def test_repr(self):
         sig = AsyncSerial.Signature(divisor=10, divisor_bits=8, data_bits=7, parity="even")
         self.assertEqual(repr(sig), "AsyncSerial.Signature(SignatureMembers({"
-                                        "'divisor': In(unsigned(8), reset=10), "
+                                        "'divisor': In(unsigned(8), init=10), "
                                         "'rx': Out(AsyncSerialRX.Signature(SignatureMembers({"
-                                            "'divisor': In(unsigned(8), reset=10), "
+                                            "'divisor': In(unsigned(8), init=10), "
                                             "'data': Out(unsigned(7)), "
                                             "'err': Out(StructLayout({"
                                                 "'overflow': 1, "
@@ -461,13 +461,13 @@ class AsyncSerialSignatureTestCase(TestCase):
                                                 "'parity': 1})), "
                                             "'rdy': Out(unsigned(1)), "
                                             "'ack': In(unsigned(1)), "
-                                            "'i': In(unsigned(1), reset=1)}))), "
+                                            "'i': In(unsigned(1), init=1)}))), "
                                         "'tx': Out(AsyncSerialTX.Signature(SignatureMembers({"
-                                            "'divisor': In(unsigned(8), reset=10), "
+                                            "'divisor': In(unsigned(8), init=10), "
                                             "'data': In(unsigned(7)), "
                                             "'rdy': Out(unsigned(1)), "
                                             "'ack': In(unsigned(1)), "
-                                            "'o': Out(unsigned(1), reset=1)})))}))")
+                                            "'o': Out(unsigned(1), init=1)})))}))")
 
     def test_wrong_divisor(self):
         with self.assertRaisesRegex(TypeError,
