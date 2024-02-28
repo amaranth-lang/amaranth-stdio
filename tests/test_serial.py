@@ -15,7 +15,7 @@ def simulation_test(dut, process):
     sim = Simulator(dut)
     with sim.write_vcd("test.vcd"):
         sim.add_clock(1e-6)
-        sim.add_sync_process(process)
+        sim.add_testbench(process)
         sim.run()
 
 
@@ -111,7 +111,7 @@ class AsyncSerialRXSignatureTestCase(TestCase):
 class AsyncSerialRXTestCase(TestCase):
     def tx_period(self):
         for _ in range((yield self.dut.divisor)):
-            yield
+            yield Tick()
 
     def tx_bits(self, bits, pins=None):
         if pins is not None:
@@ -128,7 +128,7 @@ class AsyncSerialRXTestCase(TestCase):
             yield self.dut.ack.eq(1)
             yield from self.tx_bits(bits, pins)
             while not (yield self.dut.rdy):
-                yield
+                yield Tick()
             if data is not None:
                 self.assertFalse((yield self.dut.err.overflow))
                 self.assertFalse((yield self.dut.err.frame))
@@ -202,7 +202,7 @@ class AsyncSerialRXTestCase(TestCase):
             self.assertFalse((yield self.dut.rdy))
             yield from self.tx_bits([0, 0,0,0,0,0,0,0,0, 1])
             yield from self.tx_period()
-            yield
+            yield Tick()
             self.assertFalse((yield self.dut.rdy))
             self.assertTrue((yield self.dut.err.overflow))
         simulation_test(self.dut, process)
@@ -224,12 +224,11 @@ class AsyncSerialRXTestCase(TestCase):
             self.assertTrue((yield self.fifo.r_rdy))
             self.assertEqual((yield self.fifo.r_data), 0x55)
             yield self.fifo.r_en.eq(1)
-            yield
-            yield
+            yield Tick()
             while not (yield self.fifo.r_rdy):
-                yield
+                yield Tick()
             self.assertEqual((yield self.fifo.r_data), 0xAA)
-            yield
+            yield Tick()
             self.assertFalse((yield self.fifo.r_rdy))
         simulation_test(m, process)
 
@@ -315,7 +314,7 @@ class AsyncSerialTXSignatureTestCase(TestCase):
 class AsyncSerialTXTestCase(TestCase):
     def tx_period(self):
         for _ in range((yield self.dut.divisor)):
-            yield
+            yield Tick()
 
     def tx_test(self, data, *, bits, pins=None):
         if pins is not None:
@@ -327,7 +326,7 @@ class AsyncSerialTXTestCase(TestCase):
             yield self.dut.data.eq(data)
             yield self.dut.ack.eq(1)
             while (yield self.dut.rdy):
-                yield
+                yield Tick()
             for bit in bits:
                 yield from self.tx_period()
                 self.assertEqual((yield tx_o), bit)
@@ -396,16 +395,15 @@ class AsyncSerialTXTestCase(TestCase):
             self.assertTrue((yield self.fifo.w_rdy))
             yield self.fifo.w_en.eq(1)
             yield self.fifo.w_data.eq(0x55)
-            yield
+            yield Tick()
             self.assertTrue((yield self.fifo.w_rdy))
             yield self.fifo.w_data.eq(0xAA)
-            yield
+            yield Tick()
             yield self.fifo.w_en.eq(0)
-            yield
             for bit in [0, 1,0,1,0,1,0,1,0, 1]:
                 yield from self.tx_period()
                 self.assertEqual((yield self.dut.o), bit)
-            yield
+            yield Tick()
             for bit in [0, 0,1,0,1,0,1,0,1, 1]:
                 yield from self.tx_period()
                 self.assertEqual((yield self.dut.o), bit)
@@ -525,12 +523,12 @@ class AsyncSerialTestCase(TestCase):
             self.assertTrue((yield self.dut.tx.rdy))
             yield self.dut.tx.data.eq(0xAA)
             yield self.dut.tx.ack.eq(1)
-            yield
+            yield Tick()
             yield self.dut.tx.ack.eq(0)
             yield self.dut.rx.ack.eq(1)
-            yield
+            yield Tick()
             while not (yield self.dut.rx.rdy):
-                yield
+                yield Tick()
             self.assertEqual((yield self.dut.rx.data), 0xAA)
         simulation_test(m, process)
 
@@ -544,11 +542,11 @@ class AsyncSerialTestCase(TestCase):
             self.assertTrue((yield self.dut.tx.rdy))
             yield self.dut.tx.data.eq(0xAA)
             yield self.dut.tx.ack.eq(1)
-            yield
+            yield Tick()
             yield self.dut.tx.ack.eq(0)
             yield self.dut.rx.ack.eq(1)
-            yield
+            yield Tick()
             while not (yield self.dut.rx.rdy):
-                yield
+                yield Tick()
             self.assertEqual((yield self.dut.rx.data), 0xAA)
         simulation_test(m, process)
