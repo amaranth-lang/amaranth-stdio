@@ -11,14 +11,6 @@ from amaranth.sim import *
 from amaranth_stdio.serial import *
 
 
-def simulation_test(dut, process):
-    sim = Simulator(dut)
-    with sim.write_vcd("test.vcd"):
-        sim.add_clock(1e-6)
-        sim.add_testbench(process)
-        sim.run()
-
-
 class _DummyPins:
     def __init__(self):
         self.rx = Signal(StructLayout({"i": 1}), init={"i": 1})
@@ -109,35 +101,35 @@ class AsyncSerialRXSignatureTestCase(TestCase):
 
 
 class AsyncSerialRXTestCase(TestCase):
-    def tx_period(self):
-        for _ in range((yield self.dut.divisor)):
-            yield Tick()
+    async def _rx_period(self, ctx, dut):
+        await ctx.tick().repeat(ctx.get(dut.divisor))
 
-    def tx_bits(self, bits, pins=None):
-        if pins is not None:
-            rx_i = pins.rx.i
-        else:
-            rx_i = self.dut.i
+    async def _rx_bits(self, ctx, dut, bits, pins=None):
+        rx_i = dut.i if pins is None else pins.rx.i
         for bit in bits:
-            yield from self.tx_period()
-            yield rx_i.eq(bit)
+            await self._rx_period(ctx, dut)
+            ctx.set(rx_i, bit)
 
-    def rx_test(self, bits, *, data=None, errors=None, pins=None):
-        def process():
-            self.assertFalse((yield self.dut.rdy))
-            yield self.dut.ack.eq(1)
-            yield from self.tx_bits(bits, pins)
-            while not (yield self.dut.rdy):
-                yield Tick()
+    def _rx_test(self, dut, bits, *, data=None, errors=None, pins=None):
+        async def testbench(ctx):
+            self.assertFalse(ctx.get(dut.rdy))
+            ctx.set(dut.ack, 1)
+            await self._rx_bits(ctx, dut, bits, pins)
+            await ctx.tick().until(dut.rdy)
             if data is not None:
-                self.assertFalse((yield self.dut.err.overflow))
-                self.assertFalse((yield self.dut.err.frame))
-                self.assertFalse((yield self.dut.err.parity))
-                self.assertEqual((yield self.dut.data), data)
+                self.assertFalse(ctx.get(dut.err.overflow))
+                self.assertFalse(ctx.get(dut.err.frame))
+                self.assertFalse(ctx.get(dut.err.parity))
+                self.assertEqual(ctx.get(dut.data), data)
             if errors is not None:
                 for error in errors:
-                    self.assertTrue((yield getattr(self.dut.err, error)))
-        simulation_test(self.dut, process)
+                    self.assertTrue(ctx.get(getattr(dut.err, error)))
+
+        sim = Simulator(dut)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
     def test_signature(self):
         dut = AsyncSerialRX(divisor=10, divisor_bits=8, data_bits=7, parity="even")
@@ -155,82 +147,91 @@ class AsyncSerialRXTestCase(TestCase):
         self.assertEqual(dut.signature.parity, Parity.NONE)
 
     def test_8n1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none")
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1], data=0b01110101)
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1], data=0b01110101)
 
     def test_16n1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=16, parity="none")
-        self.rx_test([0, 1,0,1,0,1,1,1,0,1,1,1,1,0,0,0,0, 1],
-                     data=0b0000111101110101)
+        dut = AsyncSerialRX(divisor=5, data_bits=16, parity="none")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0,1,1,1,1,0,0,0,0, 1],
+                      data=0b0000111101110101)
 
     def test_8m1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="mark")
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1, 1], data=0b01110101)
-        self.rx_test([0, 1,0,1,0,1,1,0,0, 1, 1], data=0b00110101)
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 0, 1], errors={"parity"})
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="mark")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1, 1], data=0b01110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,0,0, 1, 1], data=0b00110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 0, 1], errors={"parity"})
 
     def test_8s1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="space")
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 0, 1], data=0b01110101)
-        self.rx_test([0, 1,0,1,0,1,1,0,0, 0, 1], data=0b00110101)
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1, 1], errors={"parity"})
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="space")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 0, 1], data=0b01110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,0,0, 0, 1], data=0b00110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1, 1], errors={"parity"})
 
     def test_8e1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="even")
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1, 1], data=0b01110101)
-        self.rx_test([0, 1,0,1,0,1,1,0,0, 0, 1], data=0b00110101)
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 0, 1], errors={"parity"})
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="even")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1, 1], data=0b01110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,0,0, 0, 1], data=0b00110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 0, 1], errors={"parity"})
 
     def test_8o1(self):
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="odd")
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 0, 1], data=0b01110101)
-        self.rx_test([0, 1,0,1,0,1,1,0,0, 1, 1], data=0b00110101)
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1, 1], errors={"parity"})
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="odd")
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 0, 1], data=0b01110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,0,0, 1, 1], data=0b00110101)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1, 1], errors={"parity"})
 
     def test_8n1_pins(self):
         pins = _DummyPins()
-        self.dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none", pins=pins)
-        self.rx_test([0, 1,0,1,0,1,1,1,0, 1], data=0b01110101, pins=pins)
+        dut = AsyncSerialRX(divisor=5, data_bits=8, parity="none", pins=pins)
+        self._rx_test(dut, [0, 1,0,1,0,1,1,1,0, 1], data=0b01110101, pins=pins)
 
     def test_err_frame(self):
-        self.dut = AsyncSerialRX(divisor=5)
-        self.rx_test([0, 0,0,0,0,0,0,0,0, 0], errors={"frame"})
+        dut = AsyncSerialRX(divisor=5)
+        self._rx_test(dut, [0, 0,0,0,0,0,0,0,0, 0], errors={"frame"})
 
     def test_err_overflow(self):
-        self.dut = AsyncSerialRX(divisor=5)
-        def process():
-            self.assertFalse((yield self.dut.rdy))
-            yield from self.tx_bits([0, 0,0,0,0,0,0,0,0, 1])
-            yield from self.tx_period()
-            yield Tick()
-            self.assertFalse((yield self.dut.rdy))
-            self.assertTrue((yield self.dut.err.overflow))
-        simulation_test(self.dut, process)
+        dut = AsyncSerialRX(divisor=5)
+
+        async def testbench(ctx):
+            self.assertFalse(ctx.get(dut.rdy))
+            await self._rx_bits(ctx, dut, [0, 0,0,0,0,0,0,0,0, 1])
+            await self._rx_period(ctx, dut)
+            await ctx.tick()
+            self.assertFalse(ctx.get(dut.rdy))
+            self.assertTrue(ctx.get(dut.err.overflow))
+
+        sim = Simulator(dut)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
     def test_fifo(self):
-        self.dut  = AsyncSerialRX(divisor=5)
-        self.fifo = SyncFIFO(width=8, depth=4)
         m = Module()
-        m.submodules.rx   = self.dut
-        m.submodules.fifo = self.fifo
+        m.submodules.dut  = dut  = AsyncSerialRX(divisor=5)
+        m.submodules.fifo = fifo = SyncFIFO(width=8, depth=4)
+
         m.d.comb += [
-            self.dut.ack.eq(self.fifo.w_rdy),
-            self.fifo.w_en.eq(self.dut.rdy),
-            self.fifo.w_data.eq(self.dut.data),
+            dut.ack.eq(fifo.w_rdy),
+            fifo.w_en.eq(dut.rdy),
+            fifo.w_data.eq(dut.data),
         ]
-        def process():
-            yield from self.tx_bits([0, 1,0,1,0,1,0,1,0, 1,
-                                     0, 0,1,0,1,0,1,0,1, 1])
-            self.assertTrue((yield self.fifo.r_rdy))
-            self.assertEqual((yield self.fifo.r_data), 0x55)
-            yield self.fifo.r_en.eq(1)
-            yield Tick()
-            while not (yield self.fifo.r_rdy):
-                yield Tick()
-            self.assertEqual((yield self.fifo.r_data), 0xAA)
-            yield Tick()
-            self.assertFalse((yield self.fifo.r_rdy))
-        simulation_test(m, process)
+
+        async def testbench(ctx):
+            await self._rx_bits(ctx, dut, [0, 1,0,1,0,1,0,1,0, 1,
+                                           0, 0,1,0,1,0,1,0,1, 1])
+            self.assertTrue(ctx.get(fifo.r_rdy))
+            self.assertEqual(ctx.get(fifo.r_data), 0x55)
+            ctx.set(fifo.r_en, 1)
+            await ctx.tick()
+            fifo_r_data_value, = await ctx.tick().sample(fifo.r_data).until(fifo.r_rdy)
+            self.assertEqual(fifo_r_data_value, 0xAA)
+            self.assertFalse(ctx.get(fifo.r_rdy))
+
+        sim = Simulator(m)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
 
 class AsyncSerialTXSignatureTestCase(TestCase):
@@ -312,25 +313,26 @@ class AsyncSerialTXSignatureTestCase(TestCase):
 
 
 class AsyncSerialTXTestCase(TestCase):
-    def tx_period(self):
-        for _ in range((yield self.dut.divisor)):
-            yield Tick()
+    async def _tx_period(self, ctx, dut):
+        await ctx.tick().repeat(ctx.get(dut.divisor))
 
-    def tx_test(self, data, *, bits, pins=None):
-        if pins is not None:
-            tx_o = pins.tx.o
-        else:
-            tx_o = self.dut.o
-        def process():
-            self.assertTrue((yield self.dut.rdy))
-            yield self.dut.data.eq(data)
-            yield self.dut.ack.eq(1)
-            while (yield self.dut.rdy):
-                yield Tick()
+    def _tx_test(self, dut, data, *, bits, pins=None):
+        tx_o = dut.o if pins is None else pins.tx.o
+
+        async def testbench(ctx):
+            self.assertTrue(ctx.get(dut.rdy))
+            ctx.set(dut.data, data)
+            ctx.set(dut.ack, 1)
+            await ctx.tick().until(dut.rdy)
             for bit in bits:
-                yield from self.tx_period()
-                self.assertEqual((yield tx_o), bit)
-        simulation_test(self.dut, process)
+                await self._tx_period(ctx, dut)
+                self.assertEqual(ctx.get(tx_o), bit)
+
+        sim = Simulator(dut)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
     def test_signature(self):
         dut = AsyncSerialTX(divisor=10, divisor_bits=8, data_bits=7, parity="even")
@@ -348,66 +350,71 @@ class AsyncSerialTXTestCase(TestCase):
         self.assertEqual(dut.signature.parity, Parity.NONE)
 
     def test_8n1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none")
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none")
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1])
 
     def test_16n1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=16, parity="none")
-        self.tx_test(0b0000111101110101, bits=[0, 1,0,1,0,1,1,1,0,1,1,1,1,0,0,0,0, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=16, parity="none")
+        self._tx_test(dut, 0b0000111101110101, bits=[0, 1,0,1,0,1,1,1,0,1,1,1,1,0,0,0,0, 1])
 
     def test_8m1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="mark")
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1, 1])
-        self.tx_test(0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 1, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="mark")
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1, 1])
+        self._tx_test(dut, 0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 1, 1])
 
     def test_8s1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="space")
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 0, 1])
-        self.tx_test(0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 0, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="space")
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 0, 1])
+        self._tx_test(dut, 0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 0, 1])
 
     def test_8e1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="even")
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1, 1])
-        self.tx_test(0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 0, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="even")
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1, 1])
+        self._tx_test(dut, 0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 0, 1])
 
     def test_8o1(self):
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="odd")
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 0, 1])
-        self.tx_test(0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 1, 1])
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="odd")
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 0, 1])
+        self._tx_test(dut, 0b00110101, bits=[0, 1,0,1,0,1,1,0,0, 1, 1])
 
     def test_8n1_pins(self):
         pins = _DummyPins()
-        self.dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none", pins=pins)
-        self.tx_test(0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1], pins=pins)
+        dut = AsyncSerialTX(divisor=1, data_bits=8, parity="none", pins=pins)
+        self._tx_test(dut, 0b01110101, bits=[0, 1,0,1,0,1,1,1,0, 1], pins=pins)
 
     def test_fifo(self):
-        self.dut  = AsyncSerialTX(divisor=1)
-        self.fifo = SyncFIFO(width=8, depth=4)
         m = Module()
-        m.submodules.tx   = self.dut
-        m.submodules.fifo = self.fifo
+        m.submodules.tx   = dut  = AsyncSerialTX(divisor=1)
+        m.submodules.fifo = fifo = SyncFIFO(width=8, depth=4)
+
         m.d.comb += [
-            self.dut.ack.eq(self.fifo.r_rdy),
-            self.dut.data.eq(self.fifo.r_data),
-            self.fifo.r_en.eq(self.fifo.r_rdy & self.dut.rdy),
+            dut.ack.eq(fifo.r_rdy),
+            dut.data.eq(fifo.r_data),
+            fifo.r_en.eq(fifo.r_rdy & dut.rdy),
         ]
-        def process():
-            self.assertTrue((yield self.fifo.w_rdy))
-            yield self.fifo.w_en.eq(1)
-            yield self.fifo.w_data.eq(0x55)
-            yield Tick()
-            self.assertTrue((yield self.fifo.w_rdy))
-            yield self.fifo.w_data.eq(0xAA)
-            yield Tick()
-            yield self.fifo.w_en.eq(0)
+
+        async def testbench(ctx):
+            self.assertTrue(ctx.get(fifo.w_rdy))
+            ctx.set(fifo.w_en, 1)
+            ctx.set(fifo.w_data, 0x55)
+            await ctx.tick()
+            self.assertTrue(ctx.get(fifo.w_rdy))
+            ctx.set(fifo.w_data, 0xAA)
+            await ctx.tick()
+            ctx.set(fifo.w_en, 0)
             for bit in [0, 1,0,1,0,1,0,1,0, 1]:
-                yield from self.tx_period()
-                self.assertEqual((yield self.dut.o), bit)
-            yield Tick()
+                await self._tx_period(ctx, dut)
+                self.assertEqual(ctx.get(dut.o), bit)
+            await ctx.tick()
             for bit in [0, 0,1,0,1,0,1,0,1, 1]:
-                yield from self.tx_period()
-                self.assertEqual((yield self.dut.o), bit)
-        simulation_test(m, process)
+                await self._tx_period(ctx, dut)
+                self.assertEqual(ctx.get(dut.o), bit)
+
+        sim = Simulator(m)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
 
 class AsyncSerialSignatureTestCase(TestCase):
@@ -515,38 +522,49 @@ class AsyncSerialTestCase(TestCase):
         self.assertEqual(dut.signature.parity, Parity.NONE)
 
     def test_loopback(self):
-        self.dut = AsyncSerial(divisor=5)
         m = Module()
-        m.submodules.serial = self.dut
-        m.d.comb += self.dut.rx.i.eq(self.dut.tx.o)
-        def process():
-            self.assertTrue((yield self.dut.tx.rdy))
-            yield self.dut.tx.data.eq(0xAA)
-            yield self.dut.tx.ack.eq(1)
-            yield Tick()
-            yield self.dut.tx.ack.eq(0)
-            yield self.dut.rx.ack.eq(1)
-            yield Tick()
-            while not (yield self.dut.rx.rdy):
-                yield Tick()
-            self.assertEqual((yield self.dut.rx.data), 0xAA)
-        simulation_test(m, process)
+        m.submodules.dut = dut = AsyncSerial(divisor=5)
+
+        m.d.comb += dut.rx.i.eq(dut.tx.o)
+
+        async def testbench(ctx):
+            self.assertTrue(ctx.get(dut.tx.rdy))
+            ctx.set(dut.tx.data, 0xAA)
+            ctx.set(dut.tx.ack, 1)
+            await ctx.tick()
+            ctx.set(dut.tx.ack, 0)
+            ctx.set(dut.rx.ack, 1)
+            await ctx.tick()
+            await ctx.tick().until(dut.rx.rdy)
+            self.assertEqual(ctx.get(dut.rx.data), 0xAA)
+
+        sim = Simulator(m)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
 
     def test_loopback_pins(self):
         pins = _DummyPins()
-        self.dut = AsyncSerial(divisor=5, pins=pins)
+
         m = Module()
-        m.submodules.serial = self.dut
+        m.submodules.dut = dut = AsyncSerial(divisor=5, pins=pins)
+
         m.d.comb += pins.rx.i.eq(pins.tx.o)
-        def process():
-            self.assertTrue((yield self.dut.tx.rdy))
-            yield self.dut.tx.data.eq(0xAA)
-            yield self.dut.tx.ack.eq(1)
-            yield Tick()
-            yield self.dut.tx.ack.eq(0)
-            yield self.dut.rx.ack.eq(1)
-            yield Tick()
-            while not (yield self.dut.rx.rdy):
-                yield Tick()
-            self.assertEqual((yield self.dut.rx.data), 0xAA)
-        simulation_test(m, process)
+
+        async def testbench(ctx):
+            self.assertTrue(ctx.get(dut.tx.rdy))
+            ctx.set(dut.tx.data, 0xAA)
+            ctx.set(dut.tx.ack, 1)
+            await ctx.tick()
+            ctx.set(dut.tx.ack, 0)
+            ctx.set(dut.rx.ack, 1)
+            await ctx.tick()
+            await ctx.tick().until(dut.rx.rdy)
+            self.assertEqual(ctx.get(dut.rx.data), 0xAA)
+
+        sim = Simulator(m)
+        sim.add_clock(1e-6)
+        sim.add_testbench(testbench)
+        with sim.write_vcd(vcd_file="test.vcd"):
+            sim.run()
